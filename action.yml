@@ -14,5 +14,5 @@ outputs:
   processing-result:
     description: 'Result of processing'
 runs:
-  using: 'node16'
+  using: 'node18'
   main: 'index.js'
