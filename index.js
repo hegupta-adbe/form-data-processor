@@ -1,6 +1,12 @@
 const core = require('@actions/core');
 const github = require('@actions/github');
 
+async function doFetch(url, options) {
+  const response = await fetch(url, options);
+  const jsonResponse = await response.json();
+  return jsonResponse;
+}
+
 try {
   const clientId = core.getInput('azure-client-id');
   const clientSecret = core.getInput('azure-client-secret');
@@ -12,10 +18,14 @@ try {
     body: JSON.stringify(resp),
     headers: { 'Content-Type': 'application/json' }
   }
-  const response = await fetch('https://echo.zuplo.io', options)
-  const jsonResponse = await response.json();
-  console.log(jsonResponse)
-  core.setOutput("processing-result", jsonResponse);
+  doFetch('https://echo.zuplo.io', options)
+    .then(jsonResponse => {
+      console.log(jsonResponse);
+      core.setOutput("processing-result", jsonResponse);
+    })
+    .catch(err => {
+      core.setFailed(err.message);
+    })
 } catch (error) {
   core.setFailed(error.message);
 }
