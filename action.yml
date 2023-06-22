@@ -1,0 +1,18 @@
+name: 'Form Data Processor'
+description: 'Form Data Processor'
+inputs:
+  azure-client-id:
+    description: 'Azure Client ID'
+    required: true
+  azure-client-secret:
+    description: 'Azure Client Secret'
+    required: true
+  azure-resource:
+    description: 'Azure App URI'
+    required: true
+outputs:
+  processing-result:
+    description: 'Result of processing'
+runs:
+  using: 'node16'
+  main: 'index.js'
