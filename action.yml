@@ -1,14 +1,11 @@
 name: 'Form Data Processor'
 description: 'Form Data Processor'
 inputs:
-  azure-client-id:
-    description: 'Azure Client ID'
+  google-sa-email:
+    description: 'Google SA Email'
     required: true
-  azure-client-secret:
-    description: 'Azure Client Secret'
-    required: true
-  azure-resource:
-    description: 'Azure App URI'
+  google-sa-pk:
+    description: 'Google SA Private Key'
     required: true
 outputs:
   processing-result:
