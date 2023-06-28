@@ -33,15 +33,25 @@ async function getSheetData(saEmail, saPK, spreadsheetId, range) {
   return result;
 }
 
+async function getSFToken(instanceUrl, clientId, clientSecret) {
+  const url = '${instanceUrl}/services/oauth2/token?grant_type=client_credentials&client_id=${clientId}&client_secret=${clientSecret}'
+  const resp = await doFetch(url, {method: 'POST'})
+  return resp.access_token;
+}
+
 try {
   const saEmail = core.getInput('google-sa-email');
   const saPK = core.getInput('google-sa-pk');
+  const sfInstanceUrl = core.getInput('sf-instance-url');
+  const sfClientId = core.getInput('sf-client-id');
+  const sfClientSecret = core.getInput('sf-client-secret');
   const payload = github.context.payload.client_payload;
   console.log('Event payload: ', payload)
-  getSheetData(saEmail, saPK, '1aRD-ulu0YyNa9aNLg7zjVVYC5cRy9KPtBHlLtOXcgwc', 'incoming!12:13')
-    .then(jsonResponse => {
-      console.log('Fetch result: ', jsonResponse);
-      core.setOutput("processing-result", JSON.stringify(jsonResponse));
+  // getSheetData(saEmail, saPK, '1aRD-ulu0YyNa9aNLg7zjVVYC5cRy9KPtBHlLtOXcgwc', 'incoming!12:13')
+  getSFToken(sfInstanceUrl, sfClientId, sfClientSecret)
+    .then(result => {
+      console.log('Invocation result: ', result);
+      core.setOutput("processing-result", JSON.stringify({result}));
     })
     .catch(err => {
       core.setFailed(err.message);
