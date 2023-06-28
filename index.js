@@ -17,12 +17,20 @@ async function getSheetData(saEmail, saPK, spreadsheetId, range) {
        null,
        saPK,
        ['https://www.googleapis.com/auth/spreadsheets.readonly']);
-  const getResult = await sheets.spreadsheets.values.get({
+  const getResult = await sheets.spreadsheets.values.batchGet({
       auth,
       spreadsheetId,
-      range
+      ranges: ['incoming!1:1', range]
     });
-  return getResult.data.values;
+  const headers = getResult.data.valueRanges[0].values[0];
+  const result = getResult.data.valueRanges[1].values.map(row => {
+    const rowObj = {};
+    for (var i = 0; i < headers.length; i++) {
+        rowObj[headers[i]] = row[i];
+    }
+    return rowObj;
+  });
+  return result;
 }
 
 try {
