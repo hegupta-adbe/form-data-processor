@@ -45,7 +45,7 @@ async function createSFRecord(token, instanceUrl, version, recordType, row, fiel
   for (const [sheetField, sfField] of Object.entries(fieldMapping)) {
     body[sfField] = row[sheetField];
   }
-  const options = {body: JSON.stringify(body),
+  const options = {method: 'POST', body: JSON.stringify(body),
                    headers: {'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`}}
   const resp = await doFetch(url, options);
   return resp;
