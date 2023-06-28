@@ -39,6 +39,18 @@ async function getSFToken(instanceUrl, clientId, clientSecret) {
   return resp.access_token;
 }
 
+async function createSFRecord(token, instanceUrl, version, recordType, row, fieldMapping) {
+  const url = `${instanceUrl}/services/data/${version}/sobjects/${recordType}`
+  const body = {}
+  for (const [sheetField, sfField] of Object.entries(fieldMapping)) {
+    body[sfField] = row[sheetField];
+  }
+  const options = {body: JSON.stringify(body),
+                   headers: {'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`}}
+  const resp = await doFetch(url, options);
+  return resp;
+}
+
 try {
   const saEmail = core.getInput('google-sa-email');
   const saPK = core.getInput('google-sa-pk');
@@ -48,7 +60,10 @@ try {
   const payload = github.context.payload.client_payload;
   console.log('Event payload: ', payload)
   // getSheetData(saEmail, saPK, '1aRD-ulu0YyNa9aNLg7zjVVYC5cRy9KPtBHlLtOXcgwc', 'incoming!12:13')
-  getSFToken(sfInstanceUrl, sfClientId, sfClientSecret)
+  // getSFToken(sfInstanceUrl, sfClientId, sfClientSecret)
+  createSFRecord("00D010000004bAI!AQIAQIoa58V0tn3MnND_2rJ4OsXwM.V44VPEB8lAUzzaFnTWvBEhJJXBhKQ5MlrxctCR4yUeNhRdiVD.vYgW.F0W62QDVt6e",
+                 sfInstanceUrl, "v57.0", "vega__c",
+                 {fname: "Foo Bar", email: "foobar@company.com"}, {fname: "Name", email: "Email__c"})
     .then(result => {
       console.log('Invocation result: ', result);
       core.setOutput("processing-result", JSON.stringify({result}));
