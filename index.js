@@ -34,7 +34,7 @@ async function getSheetData(saEmail, saPK, spreadsheetId, range) {
 }
 
 async function getSFToken(instanceUrl, clientId, clientSecret) {
-  const url = '${instanceUrl}/services/oauth2/token?grant_type=client_credentials&client_id=${clientId}&client_secret=${clientSecret}'
+  const url = `${instanceUrl}/services/oauth2/token?grant_type=client_credentials&client_id=${clientId}&client_secret=${clientSecret}`
   const resp = await doFetch(url, {method: 'POST'})
   return resp.access_token;
 }
