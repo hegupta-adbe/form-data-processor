@@ -59,11 +59,18 @@ try {
   const sfClientSecret = core.getInput('sf-client-secret');
   const payload = github.context.payload.client_payload;
   console.log('Event payload: ', payload)
-  // getSheetData(saEmail, saPK, '1aRD-ulu0YyNa9aNLg7zjVVYC5cRy9KPtBHlLtOXcgwc', 'incoming!12:13')
-  // getSFToken(sfInstanceUrl, sfClientId, sfClientSecret)
-  createSFRecord("00D010000004bAI!AQIAQIoa58V0tn3MnND_2rJ4OsXwM.V44VPEB8lAUzzaFnTWvBEhJJXBhKQ5MlrxctCR4yUeNhRdiVD.vYgW.F0W62QDVt6e",
-                 sfInstanceUrl, "v57.0", "vega__c",
-                 {fname: "Foo Bar", email: "foobar@company.com"}, {fname: "Name", email: "Email__c"})
+  async function doWork() {
+    const rows = await getSheetData(saEmail, saPK, '1aRD-ulu0YyNa9aNLg7zjVVYC5cRy9KPtBHlLtOXcgwc', 'incoming!12:13');
+    const token = await getSFToken(sfInstanceUrl, sfClientId, sfClientSecret)
+    const result = []
+    rows.forEach(row => {
+      const rowResult = await createSFRecord(token, sfInstanceUrl, "v57.0", "vega__c", row,
+                                             {firstname: "Name", email: "Email__c"})
+      result.push(rowResult)
+    })
+    return result;
+  }
+  doWork()
     .then(result => {
       console.log('Invocation result: ', result);
       core.setOutput("processing-result", JSON.stringify({result}));
