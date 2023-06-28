@@ -7,6 +7,15 @@ inputs:
   google-sa-pk:
     description: 'Google SA Private Key'
     required: true
+  sf-instance-url:
+    description: 'Salesforce Instance URL'
+    required: true
+  sf-client-id:
+    description: 'Salesforce Client ID'
+    required: true
+  sf-client-secret:
+    description: 'Salesforce Client Secret'
+    required: true
 outputs:
   processing-result:
     description: 'Result of processing'
