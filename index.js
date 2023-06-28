@@ -63,11 +63,11 @@ try {
     const rows = await getSheetData(saEmail, saPK, '1aRD-ulu0YyNa9aNLg7zjVVYC5cRy9KPtBHlLtOXcgwc', 'incoming!12:13');
     const token = await getSFToken(sfInstanceUrl, sfClientId, sfClientSecret)
     const result = []
-    rows.forEach(row => {
+    for(const row of rows) {
       const rowResult = await createSFRecord(token, sfInstanceUrl, "v57.0", "vega__c", row,
                                              {firstname: "Name", email: "Email__c"})
       result.push(rowResult)
-    })
+    }
     return result;
   }
   doWork()
