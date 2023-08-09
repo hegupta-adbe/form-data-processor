@@ -112,7 +112,7 @@ try {
   const sfVersion = core.getInput('sf-version');
   const sfType = core.getInput('sf-type');
 
-  const sfMapping = core.getInput('form-to-sf-mapping');
+  const sfMapping = JSON.parse(core.getInput('form-to-sf-mapping'));
 
   const auth = new google.auth.JWT(
        saEmail,
