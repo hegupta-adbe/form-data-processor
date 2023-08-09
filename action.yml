@@ -7,6 +7,17 @@ inputs:
   google-sa-pk:
     description: 'Google SA Private Key'
     required: true
+  google-sheet-id:
+    description: 'Google Spreadsheet ID'
+    required: true
+  sheet-status-column:
+    description: 'Name of status column in sheet'
+    required: true
+    default: 'ProcessingStatus'
+  sheet-error-column:
+    description: 'Name of error message column in sheet'
+    required: true
+    default: 'ErrorMessage'
   sf-instance-url:
     description: 'Salesforce Instance URL'
     required: true
@@ -15,6 +26,15 @@ inputs:
     required: true
   sf-client-secret:
     description: 'Salesforce Client Secret'
+    required: true
+  sf-version:
+    description: 'Salesforce Version'
+    required: true
+  sf-type:
+    description: 'Salesforce Object Type'
+    required: true
+  form-to-sf-mapping:
+    description: 'Form to SalesForce field mapping'
     required: true
 outputs:
   processing-result:
