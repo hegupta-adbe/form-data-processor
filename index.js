@@ -46,27 +46,44 @@ async function setupIncoming(auth, spreadsheetId, statusCol, msgCol) {
   return {headers, statusColIdx, msgColIdx}
 }
 
-async function getUnprocessedIncomingRows(auth, spreadsheetId, statusCol) {
+async function getSheetData(auth, spreadsheetId, sheetName) {
   const getResult = await sheets.spreadsheets.values.get({
       auth,
       spreadsheetId,
-      range: 'incoming'
+      range: sheetName
     });
   const allRowsWithHeader = getResult.data.values;
   const headers = allRowsWithHeader.shift();
-  const dataRows = allRowsWithHeader.map(row => {
+  return allRowsWithHeader.map(row => {
     const rowObj = {};
     for (var i = 0; i < headers.length; i++) {
         rowObj[headers[i]] = i < row.length? row[i]: '';
     }
     return rowObj;
   });
+}
+
+async function getUnprocessedIncomingRows(auth, spreadsheetId, statusCol) {
+  const dataRows = await getSheetData(auth, spreadsheetId, 'incoming');
   const result = [];
   for (var i = 0; i < dataRows.length; i++) {
     var row = dataRows[i];
     if (row[statusCol] === '') {
         result.push({rowIdx: i + 1, rowData: row});
     }
+  }
+  return result;
+}
+
+async function getKV(auth, spreadsheetId, sheetName, keyCol, valueCol, allowEmptyVal, base) {
+  const dataRows = await getSheetData(auth, spreadsheetId, sheetName);
+  const result = JSON.parse(JSON.stringify(base));
+  for (const row of dataRows) {
+      const val = row[valueCol];
+      if ((val === '') && (! allowEmptyVal)) {
+          continue;
+      }
+      result[row[keyCol]] = val;
   }
   return result;
 }
@@ -103,16 +120,12 @@ try {
   const saEmail = core.getInput('google-sa-email');
   const saPK = core.getInput('google-sa-pk');
   const spreadsheetId = core.getInput('google-sheet-id');
-  const statusCol = core.getInput('sheet-status-column');
-  const msgCol = core.getInput('sheet-error-column');
 
   const sfInstanceUrl = core.getInput('sf-instance-url');
   const sfClientId = core.getInput('sf-client-id');
   const sfClientSecret = core.getInput('sf-client-secret');
-  const sfVersion = core.getInput('sf-version');
-  const sfType = core.getInput('sf-type');
 
-  const sfMapping = JSON.parse(core.getInput('form-to-sf-mapping'));
+  const defaultConfig = JSON.parse(core.getInput('default-settings'));
 
   const auth = new google.auth.JWT(
        saEmail,
@@ -120,6 +133,19 @@ try {
        saPK,
        ['https://www.googleapis.com/auth/spreadsheets']);
   async function doWork() {
+    console.log("Base config: ", JSON.stringify(defaultConfig));
+    const metadata = await getKV(auth, spreadsheetId, 'metadata', 'Key', 'Value', true, defaultConfig);
+    console.log("Final config: ", JSON.stringify(metadata))
+    const statusCol = metadata['IncomingStatusColumn'];
+    const msgCol = metadata['IncomingErrorMsgColumn'];
+    const sfType = metadata['SFObjectType'];
+    const sfVersion = metadata['SFObjectVersion'];
+    const sfMappingSheet = metadata['SFMappingSheet'];
+    const formFieldNameCol = metadata['FormFieldNameColumn'];
+    const sfFieldNameCol = metadata['SFFieldNameColumn'];
+    const sfMapping = await getKV(auth, spreadsheetId, sfMappingSheet, formFieldNameCol, sfFieldNameCol, false, {});
+    console.log("Mapping: ", JSON.stringify(sfMapping));
+
     const headerResp = await setupIncoming(auth, spreadsheetId, statusCol, msgCol);
     const rows = await getUnprocessedIncomingRows(auth, spreadsheetId, statusCol);
     const token = await getSFToken(sfInstanceUrl, sfClientId, sfClientSecret)

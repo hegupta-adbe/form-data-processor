@@ -10,14 +10,6 @@ inputs:
   google-sheet-id:
     description: 'Google Spreadsheet ID'
     required: true
-  sheet-status-column:
-    description: 'Name of status column in sheet'
-    required: true
-    default: 'ProcessingStatus'
-  sheet-error-column:
-    description: 'Name of error message column in sheet'
-    required: true
-    default: 'ErrorMessage'
   sf-instance-url:
     description: 'Salesforce Instance URL'
     required: true
@@ -27,15 +19,10 @@ inputs:
   sf-client-secret:
     description: 'Salesforce Client Secret'
     required: true
-  sf-version:
-    description: 'Salesforce Version'
+  default-settings:
+    description: 'Default settings'
     required: true
-  sf-type:
-    description: 'Salesforce Object Type'
-    required: true
-  form-to-sf-mapping:
-    description: 'Form to SalesForce field mapping'
-    required: true
+    default: '{"SFMappingSheet": "helix-default", "FormFieldNameColumn": "Name", "IncomingStatusColumn": "ProcessingStatus", "IncomingErrorMsgColumn": "ErrorMessage"}'
 outputs:
   processing-result:
     description: 'Result of processing'
