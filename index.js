@@ -117,6 +117,9 @@ async function createSFRecord(token, instanceUrl, version, recordType, row, fiel
 
 
 try {
+  const payload = github.context.payload.client_payload;
+  console.log('Event payload: ', JSON.stringify(payload));
+
   const saEmail = core.getInput('google-sa-email');
   const saPK = core.getInput('google-sa-pk');
   const spreadsheetId = core.getInput('google-sheet-id');
