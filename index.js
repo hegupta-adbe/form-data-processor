@@ -1,70 +1,50 @@
 import * as core from '@actions/core';
 import * as github from '@actions/github';
 import fetch from 'node-fetch';
-import {google} from 'googleapis';
 
-const sheets = google.sheets('v4');
-
-function getBatchUpdateRequest(auth, spreadsheetId, data) {
-    return {
-        spreadsheetId,
-        resource: {
-          valueInputOption: 'RAW',
-          data
-        },
-        auth
-    };
+async function doFetch(url, options, expStatus, opDesc, respBody = true) {
+  const response = await fetch(url, options);
+  const jsonResponse = respBody? await response.json(): {};
+  if (response.status != expStatus) {
+    throw new Error("Received unexpected status code " + response.status + " on " + opDesc + " operation with response body: " + JSON.stringify(jsonResponse))
+  }
+  return jsonResponse;
 }
 
-function appendIncomingCellUpdate(data, rowIdx, colIdx, val) {
-    const cellR1C1 = "R" + (rowIdx + 1) + "C" + (colIdx + 1);
-    data.push({range: "incoming!" + cellR1C1 + ":" + cellR1C1, values: [[val]]});
+async function createSession(token, sheetUrl, persistent) {
+  const resp = await doFetch(sheetUrl + '/createSession',
+    {method: 'POST',
+     headers: {'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json'},
+     body: JSON.stringify({persistChanges: persistent})},
+    201, 'Create session');
+  return resp.id;
 }
 
-async function getOrCreateCol(headers, auth, spreadsheetId, colName) {
-    var colIdx = headers.indexOf(colName)
-    if (colIdx === -1) {
-        headers.push(colName);
-        colIdx = headers.length - 1;
-        const data = []
-        appendIncomingCellUpdate(data, 0, colIdx, colName);
-        const request = getBatchUpdateRequest(auth, spreadsheetId, data);
-        await sheets.spreadsheets.values.batchUpdate(request);
-    }
-    return colIdx;
+async function closeSession(token, sheetUrl, sessionId) {
+  await doFetch(sheetUrl + '/closeSession',
+    {method: 'POST',
+     headers: {'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json', 'workbook-session-id': sessionId}},
+    204, 'Close session', false);
 }
 
-async function setupIncoming(auth, spreadsheetId, statusCol, msgCol) {
-  const getResult = await sheets.spreadsheets.values.get({
-      auth,
-      spreadsheetId,
-      range: 'incoming!1:1'
-    });
-  const headers = getResult.data.values[0];
-  const statusColIdx = await getOrCreateCol(headers, auth, spreadsheetId, statusCol);
-  const msgColIdx = await getOrCreateCol(headers, auth, spreadsheetId, msgCol);
-  return {headers, statusColIdx, msgColIdx}
+function toObj(headers, row) {
+  const rowObj = {};
+  for (var i = 0; i < headers.length; i++) {
+      rowObj[headers[i]] = i < row.length? row[i]: '';
+  }
+  return rowObj;
 }
 
-async function getSheetData(auth, spreadsheetId, sheetName) {
-  const getResult = await sheets.spreadsheets.values.get({
-      auth,
-      spreadsheetId,
-      range: sheetName
-    });
-  const allRowsWithHeader = getResult.data.values;
-  const headers = allRowsWithHeader.shift();
-  return allRowsWithHeader.map(row => {
-    const rowObj = {};
-    for (var i = 0; i < headers.length; i++) {
-        rowObj[headers[i]] = i < row.length? row[i]: '';
-    }
-    return rowObj;
-  });
+async function getSheetData(token, sheetUrl, sheetName) {
+  const rangeResp = await doFetch(sheetUrl + '/worksheets/' + sheetName + '/usedRange',
+    {headers: {'Authorization': `Bearer ${token}`}}, 200, 'Fetch sheet data');
+  const headers = rangeResp.values.shift();
+  const data = rangeResp.values.map(row => toObj(headers, row));
+  return [headers, data]
 }
 
-async function getUnprocessedIncomingRows(auth, spreadsheetId, statusCol) {
-  const dataRows = await getSheetData(auth, spreadsheetId, 'incoming');
+async function getUnprocessedIncomingRows(token, sheetUrl, statusCol) {
+  const [headers, dataRows] = await getSheetData(token, sheetUrl, 'incoming');
   const result = [];
   for (var i = 0; i < dataRows.length; i++) {
     var row = dataRows[i];
@@ -72,11 +52,33 @@ async function getUnprocessedIncomingRows(auth, spreadsheetId, statusCol) {
         result.push({rowIdx: i + 1, rowData: row});
     }
   }
-  return result;
+  return [headers, result];
 }
 
-async function getKV(auth, spreadsheetId, sheetName, keyCol, valueCol, allowEmptyVal, base) {
-  const dataRows = await getSheetData(auth, spreadsheetId, sheetName);
+async function filterUnprocessedIncomingRows(token, sheetUrl, statusCol) {
+  const table = 'intake_form';
+  const sessionId = await createSession(token, sheetUrl, false);
+  try {
+    await doFetch(sheetUrl + '/tables/' + table + '/clearFilters',
+      {method: 'POST', headers: {'Authorization': `Bearer ${token}`, 'Workbook-Session-Id': sessionId}}, 204, 'Clear table filters', false);
+    await doFetch(sheetUrl + '/tables/' + table + '/columns/' + statusCol + '/filter/apply',
+      {method: 'POST', headers: {'Authorization': `Bearer ${token}`, 'Workbook-Session-Id': sessionId},
+       body: JSON.stringify({criteria: {filterOn: 'values', values: [''] } })}, 204, 'Apply status filter', false);
+    const resp = await doFetch(sheetUrl + '/tables/' + table + '/range/visibleView/rows',
+      {method: 'GET', headers: {'Authorization': `Bearer ${token}`, 'Workbook-Session-Id': sessionId}}, 200, 'Get filtered rows');
+    const headers = resp.value.shift().values[0];
+    const result = [];
+    for (const row of resp.value) {
+        result.push({rowAddresses: row.cellAddresses[0], rowData: toObj(headers, row.values[0])});
+    }
+    return [headers, result];
+  } finally {
+    await closeSession(token, sheetUrl, sessionId);
+  }
+}
+
+async function getKV(token, sheetUrl, sheetName, keyCol, valueCol, allowEmptyVal, base) {
+  const [headers, dataRows] = await getSheetData(token, sheetUrl, sheetName);
   const result = JSON.parse(JSON.stringify(base));
   for (const row of dataRows) {
       const val = row[valueCol];
@@ -88,13 +90,25 @@ async function getKV(auth, spreadsheetId, sheetName, keyCol, valueCol, allowEmpt
   return result;
 }
 
-async function doFetch(url, options, expStatus, opDesc) {
-  const response = await fetch(url, options);
-  const jsonResponse = await response.json();
-  if (response.status != expStatus) {
-    throw new Error("Received unexpected status code " + response.status + " on " + opDesc + " operation with response body: " + JSON.stringify(jsonResponse))
-  }
-  return jsonResponse;
+async function updateTableRow(token, sessionId, sheetUrl, table, numCols, tableRowIdx, updateIdx, updateVals) {
+    const vals = new Array(numCols).fill(null);
+    for (var i = 0; i < updateIdx.length; i++) {
+        vals[updateIdx[i]] = updateVals[i];
+    }
+    await doFetch(`${sheetUrl}/tables/${table}/rows/$/ItemAt(index=${tableRowIdx})`,
+        {method: 'PATCH', body: JSON.stringify({values: [vals]}),
+         headers: {'Authorization': `Bearer ${token}`, 'Workbook-Session-Id': sessionId}}, 200, 'Update table row');
+}
+
+async function updateRowViaRange(token, sessionId, sheetUrl, sheet, rowAddr, updateIdx, updateVals) {
+    const vals = new Array(rowAddr.length).fill(null);
+    for (var i = 0; i < updateIdx.length; i++) {
+        vals[updateIdx[i]] = updateVals[i];
+    }
+    await doFetch(`${sheetUrl}/worksheets/${sheet}/range(address='${rowAddr[0]}:${rowAddr[rowAddr.length - 1]}')`,
+        {method: 'PATCH', body: JSON.stringify({values: [vals]}),
+         headers: {'Authorization': `Bearer ${token}`, 'Workbook-Session-Id': sessionId, 'Content-Type': 'application/json'}},
+        200, 'Update range');
 }
 
 async function getSFToken(instanceUrl, clientId, clientSecret) {
@@ -119,25 +133,21 @@ async function createSFRecord(token, instanceUrl, version, recordType, row, fiel
 try {
   const payload = github.context.payload.client_payload;
   console.log('Event payload: ', JSON.stringify(payload));
+  const sourceLocation = payload.sourceLocation;
 
-  const saEmail = core.getInput('google-sa-email');
-  const saPK = core.getInput('google-sa-pk');
-  const spreadsheetId = core.getInput('google-sheet-id');
-
+  const authToken = core.getInput('ms-graph-auth-token');
   const sfInstanceUrl = core.getInput('sf-instance-url');
   const sfClientId = core.getInput('sf-client-id');
   const sfClientSecret = core.getInput('sf-client-secret');
-
   const defaultConfig = JSON.parse(core.getInput('default-settings'));
 
-  const auth = new google.auth.JWT(
-       saEmail,
-       null,
-       saPK,
-       ['https://www.googleapis.com/auth/spreadsheets']);
   async function doWork() {
+    if (! sourceLocation.startsWith('onedrive:/')) {
+        throw new Error('Unsupported source location ' + sourceLocation);
+    }
+    const workbookUrl = `https://graph.microsoft.com/v1.0/${sourceLocation.substring('onedrive:/'.length)}/workbook`
     console.log("Base config: ", JSON.stringify(defaultConfig));
-    const metadata = await getKV(auth, spreadsheetId, 'metadata', 'Key', 'Value', true, defaultConfig);
+    const metadata = await getKV(authToken, workbookUrl, 'metadata', 'Key', 'Value', true, defaultConfig);
     console.log("Final config: ", JSON.stringify(metadata))
     const statusCol = metadata['IncomingStatusColumn'];
     const msgCol = metadata['IncomingErrorMsgColumn'];
@@ -146,28 +156,30 @@ try {
     const sfMappingSheet = metadata['SFMappingSheet'];
     const formFieldNameCol = metadata['FormFieldNameColumn'];
     const sfFieldNameCol = metadata['SFFieldNameColumn'];
-    const sfMapping = await getKV(auth, spreadsheetId, sfMappingSheet, formFieldNameCol, sfFieldNameCol, false, {});
+    const sfMapping = await getKV(authToken, workbookUrl, sfMappingSheet, formFieldNameCol, sfFieldNameCol, false, {});
     console.log("Mapping: ", JSON.stringify(sfMapping));
 
-    const headerResp = await setupIncoming(auth, spreadsheetId, statusCol, msgCol);
-    const rows = await getUnprocessedIncomingRows(auth, spreadsheetId, statusCol);
+    const [headers, rows] = await filterUnprocessedIncomingRows(authToken, workbookUrl, statusCol);
+    const statusIdx = headers.indexOf(statusCol);
+    const msgIdx = headers.indexOf(msgCol);
     const token = await getSFToken(sfInstanceUrl, sfClientId, sfClientSecret)
     const data = []
     const result = []
-    for (const row of rows) {
-        try {
-            const rowRes = await createSFRecord(token, sfInstanceUrl, sfVersion, sfType, row.rowData, sfMapping);
-            result.push({rowNumber: row.rowIdx + 1, status: 'SUCCESS', response: rowRes});
-            appendIncomingCellUpdate(data, row.rowIdx, headerResp.statusColIdx, 'SUCCESS');
-            appendIncomingCellUpdate(data, row.rowIdx, headerResp.msgColIdx, '')
-        } catch (err) {
-            result.push({rowNumber: row.rowIdx + 1, status: 'FAILURE', errorMessage: err.message});
-            appendIncomingCellUpdate(data, row.rowIdx, headerResp.statusColIdx, 'FAILURE')
-            appendIncomingCellUpdate(data, row.rowIdx, headerResp.msgColIdx, err.message)
-        }
+    const sessionId = await createSession(authToken, workbookUrl, true);
+    try {
+      for (const row of rows) {
+          try {
+              const rowRes = await createSFRecord(token, sfInstanceUrl, sfVersion, sfType, row.rowData, sfMapping);
+              result.push({rowRange: `${row.rowAddresses[0]}:${row.rowAddresses[row.rowAddresses.length - 1]}`, status: 'SUCCESS', response: rowRes});
+              await updateRowViaRange(authToken, sessionId, workbookUrl, 'incoming', row.rowAddresses, [statusIdx, msgIdx], ['Y', 'SUCCESS']);
+          } catch (err) {
+              result.push({rowRange: `${row.rowAddresses[0]}:${row.rowAddresses[row.rowAddresses.length - 1]}`, status: 'FAILURE', errorMessage: err.message});
+              await updateRowViaRange(authToken, sessionId, workbookUrl, 'incoming', row.rowAddresses, [statusIdx, msgIdx], ['N', `FAILURE: ${err.message}`]);
+          }
+      }
+    } finally {
+      await closeSession(authToken, workbookUrl, sessionId);
     }
-    const request = getBatchUpdateRequest(auth, spreadsheetId, data);
-    await sheets.spreadsheets.values.batchUpdate(request);
     return result;
   }
   doWork()
@@ -177,7 +189,9 @@ try {
     })
     .catch(err => {
       core.setFailed(err.message);
+      throw err;
     })
 } catch (error) {
   core.setFailed(error.message);
+  throw error;
 }

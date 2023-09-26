@@ -1,14 +1,8 @@
 name: 'Form Data Processor'
 description: 'Form Data Processor'
 inputs:
-  google-sa-email:
-    description: 'Google SA Email'
-    required: true
-  google-sa-pk:
-    description: 'Google SA Private Key'
-    required: true
-  google-sheet-id:
-    description: 'Google Spreadsheet ID'
+  ms-graph-auth-token:
+    description: 'MS Graph Access Token'
     required: true
   sf-instance-url:
     description: 'Salesforce Instance URL'
