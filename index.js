@@ -90,6 +90,36 @@ async function getKV(token, sheetUrl, sheetName, keyCol, valueCol, allowEmptyVal
   return result;
 }
 
+function toRowNum(cellAddress) {
+    var startIdx = -1;
+    for (var i = 0; i < cellAddress.length; i++) {
+        if (/^\d$/.test(cellAddress[i])) {
+            startIdx = i;
+            break;
+        }
+    };
+    return parseInt(cellAddress.substring(startIdx));
+}
+
+function toContiguousBlocks(rowUpdates) {
+    if (rowUpdates.length == 0) {
+        return [];
+    }
+    const blocks = [];
+    var rowNum = toRowNum(rowUpdates[0][0][0]);
+    blocks.push([rowNum, rowNum, [rowUpdates[0]]]);
+    for (var i = 1; i < rowUpdates.length; i++) {
+        rowNum = toRowNum(rowUpdates[i][0][0]);
+        if (rowNum == blocks[blocks.length - 1][1] + 1) {
+            blocks[blocks.length - 1][1] = rowNum;
+            blocks[blocks.length - 1][2].push(rowUpdates[i]);
+        } else {
+            blocks.push([rowNum, rowNum, [rowUpdates[i]]]);
+        }
+    }
+    return blocks;
+}
+
 async function updateTableRow(token, sessionId, sheetUrl, table, numCols, tableRowIdx, updateIdx, updateVals) {
     const vals = new Array(numCols).fill(null);
     for (var i = 0; i < updateIdx.length; i++) {
@@ -100,13 +130,21 @@ async function updateTableRow(token, sessionId, sheetUrl, table, numCols, tableR
          headers: {'Authorization': `Bearer ${token}`, 'Workbook-Session-Id': sessionId}}, 200, 'Update table row');
 }
 
-async function updateRowViaRange(token, sessionId, sheetUrl, sheet, rowAddr, updateIdx, updateVals) {
-    const vals = new Array(rowAddr.length).fill(null);
-    for (var i = 0; i < updateIdx.length; i++) {
-        vals[updateIdx[i]] = updateVals[i];
+async function updateRowsViaBlockRange(token, sessionId, sheetUrl, sheet, updateIdx, block) {
+    const values = [];
+    for (const [rowAddr, updateVals] of block) {
+        const vals = new Array(rowAddr.length).fill(null);
+        for (var i = 0; i < updateIdx.length; i++) {
+            vals[updateIdx[i]] = updateVals[i];
+        }
+        values.push(vals);
     }
-    await doFetch(`${sheetUrl}/worksheets/${sheet}/range(address='${rowAddr[0]}:${rowAddr[rowAddr.length - 1]}')`,
-        {method: 'PATCH', body: JSON.stringify({values: [vals]}),
+    const topLeft = block[0][0][0];
+    const lastRowAddr = block[block.length - 1][0];
+    const bottomRight = lastRowAddr[lastRowAddr.length - 1];
+    console.log(`Making batch update call for rows ${topLeft}:${bottomRight}`);
+    await doFetch(`${sheetUrl}/worksheets/${sheet}/range(address='${topLeft}:${bottomRight}')`,
+        {method: 'PATCH', body: JSON.stringify({values}),
          headers: {'Authorization': `Bearer ${token}`, 'Workbook-Session-Id': sessionId, 'Content-Type': 'application/json'}},
         200, 'Update range');
 }
@@ -165,18 +203,23 @@ try {
     const token = await getSFToken(sfInstanceUrl, sfClientId, sfClientSecret)
     const data = []
     const result = []
+    const updates = []
+    for (const row of rows) {
+        try {
+            const rowRes = await createSFRecord(token, sfInstanceUrl, sfVersion, sfType, row.rowData, sfMapping);
+            result.push({rowRange: `${row.rowAddresses[0]}:${row.rowAddresses[row.rowAddresses.length - 1]}`, status: 'SUCCESS', response: rowRes});
+            updates.push([row.rowAddresses, ['Y', 'SUCCESS']]);
+        } catch (err) {
+            result.push({rowRange: `${row.rowAddresses[0]}:${row.rowAddresses[row.rowAddresses.length - 1]}`, status: 'FAILURE', errorMessage: err.message});
+            updates.push([row.rowAddresses, ['N', `FAILURE: ${err.message}`]]);
+        }
+    }
     const sessionId = await createSession(authToken, workbookUrl, true);
     try {
-      for (const row of rows) {
-          try {
-              const rowRes = await createSFRecord(token, sfInstanceUrl, sfVersion, sfType, row.rowData, sfMapping);
-              result.push({rowRange: `${row.rowAddresses[0]}:${row.rowAddresses[row.rowAddresses.length - 1]}`, status: 'SUCCESS', response: rowRes});
-              await updateRowViaRange(authToken, sessionId, workbookUrl, 'incoming', row.rowAddresses, [statusIdx, msgIdx], ['Y', 'SUCCESS']);
-          } catch (err) {
-              result.push({rowRange: `${row.rowAddresses[0]}:${row.rowAddresses[row.rowAddresses.length - 1]}`, status: 'FAILURE', errorMessage: err.message});
-              await updateRowViaRange(authToken, sessionId, workbookUrl, 'incoming', row.rowAddresses, [statusIdx, msgIdx], ['N', `FAILURE: ${err.message}`]);
-          }
-      }
+        const blocks = toContiguousBlocks(updates);
+        for (const block of blocks) {
+            await updateRowsViaBlockRange(authToken, sessionId, workbookUrl, 'incoming', [statusIdx, msgIdx], block[2]);
+        }
     } finally {
       await closeSession(authToken, workbookUrl, sessionId);
     }
