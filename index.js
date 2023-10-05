@@ -5,7 +5,14 @@ import _sodium from 'libsodium-wrappers';
 
 async function doFetchRaw(url, options, expStatus, opDesc, respBody = true) {
   const response = await fetch(url, options);
-  const jsonResponse = respBody? await response.json(): {};
+  var jsonResponse = {};
+  try {
+    jsonResponse = await response.json();
+  } catch (err) {
+    if (respBody) {
+      console.log(`WARN: Received unexpected non-JSON response on operation ${opDesc}`);
+    }
+  }
   if (response.status != expStatus) {
     throw new Error("Received unexpected status code " + response.status + " on " + opDesc + " operation with response body: " + JSON.stringify(jsonResponse))
   }
