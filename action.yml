@@ -1,9 +1,48 @@
 name: 'Form Data Processor'
 description: 'Form Data Processor'
 inputs:
-  ms-graph-auth-token:
-    description: 'MS Graph Access Token'
+  repo-owner:
+    description: 'Repository owner'
     required: true
+  repo-name:
+    description: 'Repository name'
+    required: true
+  repo-key-id:
+    description: 'Repository public key ID'
+    required: true
+  repo-key:
+    description: 'Repository public key'
+    required: true
+  repo-token:
+    description: 'Repository bearer token'
+    required: true
+  repo-graph-access-token-secret:
+    description: 'Repository secret name for MS Graph access token'
+    required: true
+    default: 'MS_GRAPH_AUTH_TOKEN'
+  repo-graph-refresh-token-secret:
+    description: 'Repository secret name for MS Graph refresh token'
+    required: true
+    default: 'MS_GRAPH_REFRESH_TOKEN'
+  ms-graph-tenant:
+    description: 'MS Graph tenant ID'
+    required: true
+  ms-graph-auth-token:
+    description: 'MS Graph access token'
+    required: true
+  ms-graph-refresh-token:
+    description: 'MS Graph refresh token'
+    required: true
+  ms-graph-client-id:
+    description: 'MS Graph client ID'
+    required: true
+  ms-graph-client-secret:
+    description: 'MS Graph client secret'
+    required: true
+  ms-graph-scope:
+    description: 'MS Graph token scope'
+    required: true
+    default: 'offline_access Files.ReadWrite'
   sf-instance-url:
     description: 'Salesforce Instance URL'
     required: true
