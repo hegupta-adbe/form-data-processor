@@ -1,11 +1,8 @@
 name: 'Form Data Processor'
 description: 'Form Data Processor'
 inputs:
-  repo-owner:
-    description: 'Repository owner'
-    required: true
-  repo-name:
-    description: 'Repository name'
+  repo-owner-name:
+    description: 'Repository owner and name'
     required: true
   repo-key-id:
     description: 'Repository public key ID'

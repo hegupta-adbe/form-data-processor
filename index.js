@@ -24,7 +24,7 @@ async function encryptForGithub(secret, key) {
 
 async function updateGithubSecret(tokenHolder, secretName, secretVal) {
   const encSecret = await encryptForGithub(secretVal, tokenHolder.repoKey);
-  const url = `https://api.github.com/repos/${tokenHolder.repoOwner}/${tokenHolder.repoName}/actions/secrets/${secretName}`;
+  const url = `https://api.github.com/repos/${tokenHolder.repoOwnerAndName}/actions/secrets/${secretName}`;
   const headers = {'Accept': 'application/vnd.github+json', 'Authorization': `Bearer ${tokenHolder.repoToken}`, 'X-GitHub-Api-Version': '2022-11-28'};
   const body = JSON.stringify({encrypted_value: encSecret, key_id: tokenHolder.repoKeyID});
   await doFetchRaw(url, {method: 'PUT', headers, body}, 204, `Update Github secret ${secretName}`, false);
@@ -235,8 +235,7 @@ try {
   console.log('Event payload: ', JSON.stringify(payload));
   const sourceLocation = payload.sourceLocation;
 
-  const repoOwner = core.getInput('repo-owner');
-  const repoName = core.getInput('repo-name');
+  const repoOwnerAndName = core.getInput('repo-owner-name');
   const repoKeyID = core.getInput('repo-key-id');
   const repoKey = core.getInput('repo-key');
   const repoToken = core.getInput('repo-token');
@@ -261,7 +260,7 @@ try {
         throw new Error('Unsupported source location ' + sourceLocation);
     }
     const tokenholder = {graphTenant, graphAccessToken, graphRefreshToken, graphClientId, graphClientSecret, graphScope,
-        repoOwner, repoName, repoKeyID, repoKey, repoToken, repoGraphAccessTokenSecret, repoGraphRefreshTokenSecret};
+        repoOwnerAndName, repoKeyID, repoKey, repoToken, repoGraphAccessTokenSecret, repoGraphRefreshTokenSecret};
     const workbookUrl = `https://graph.microsoft.com/v1.0/${sourceLocation.substring('onedrive:/'.length)}/workbook`
     console.log("Base config: ", JSON.stringify(defaultConfig));
     const metadata = await getKV(tokenholder, workbookUrl, 'metadata', 'Key', 'Value', true, defaultConfig);
