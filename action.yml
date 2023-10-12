@@ -40,6 +40,10 @@ inputs:
     description: 'MS Graph token scope'
     required: true
     default: 'offline_access Files.ReadWrite'
+  max-rows:
+    description: 'Max rows to be processed'
+    required: true
+    default: '-1'
   sf-instance-url:
     description: 'Salesforce Instance URL'
     required: true

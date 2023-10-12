@@ -124,7 +124,7 @@ async function getUnprocessedIncomingRows(tokenHolder, sheetUrl, statusCol) {
   return [headers, result];
 }
 
-async function filterUnprocessedIncomingRows(tokenHolder, sheetUrl, statusCol) {
+async function filterUnprocessedIncomingRows(tokenHolder, sheetUrl, statusCol, maxRows) {
   const table = 'intake_form';
   const sessionId = await createSession(tokenHolder, sheetUrl, false);
   try {
@@ -133,7 +133,9 @@ async function filterUnprocessedIncomingRows(tokenHolder, sheetUrl, statusCol) {
     await doFetchWithRefresh(sheetUrl + '/tables/' + table + '/columns/' + statusCol + '/filter/apply', tokenHolder,
       {method: 'POST', headers: {'Workbook-Session-Id': sessionId},
        body: JSON.stringify({criteria: {filterOn: 'values', values: [''] } })}, 204, 'Apply status filter', false);
-    const resp = await doFetchWithRefresh(sheetUrl + '/tables/' + table + '/range/visibleView/rows', tokenHolder,
+    // maxRows + 1 for header which is always present
+    const resp = await doFetchWithRefresh(sheetUrl + '/tables/' + table + '/range/visibleView/rows'
+      + (maxRows == -1? '': '?$top=' + (maxRows + 1)), tokenHolder,
       {method: 'GET', headers: {'Workbook-Session-Id': sessionId}}, 200, 'Get filtered rows');
     const headers = resp.value.shift().values[0];
     const result = [];
@@ -255,6 +257,7 @@ try {
   const graphClientId = core.getInput('ms-graph-client-id');
   const graphClientSecret = core.getInput('ms-graph-client-secret');
   const graphScope = core.getInput('ms-graph-scope');
+  const maxRows = parseInt(core.getInput('max-rows'));
 
   const sfInstanceUrl = core.getInput('sf-instance-url');
   const sfClientId = core.getInput('sf-client-id');
@@ -282,7 +285,7 @@ try {
     const sfMapping = await getKV(tokenholder, workbookUrl, sfMappingSheet, formFieldNameCol, sfFieldNameCol, false, {});
     console.log("Mapping: ", JSON.stringify(sfMapping));
 
-    const [headers, rows] = await filterUnprocessedIncomingRows(tokenholder, workbookUrl, statusCol);
+    const [headers, rows] = await filterUnprocessedIncomingRows(tokenholder, workbookUrl, statusCol, maxRows);
     const statusIdx = headers.indexOf(statusCol);
     const msgIdx = headers.indexOf(msgCol);
     const token = await getSFToken(sfInstanceUrl, sfClientId, sfClientSecret)
