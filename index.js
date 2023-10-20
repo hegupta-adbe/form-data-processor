@@ -2,8 +2,9 @@ import * as core from '@actions/core';
 import * as github from '@actions/github';
 import fetch from 'node-fetch';
 import _sodium from 'libsodium-wrappers';
+import { OneDrive, OneDriveAuth } from "@adobe/helix-onedrive-support";
 
-async function doFetchRaw(url, options, expStatus, opDesc, respBody = true) {
+async function doFetchRaw(url, options, expStatuses, opDesc, respBody = true) {
   const response = await fetch(url, options);
   var jsonResponse = {};
   try {
@@ -13,7 +14,7 @@ async function doFetchRaw(url, options, expStatus, opDesc, respBody = true) {
       console.log(`WARN: Received unexpected non-JSON response on operation ${opDesc}`);
     }
   }
-  if (response.status != expStatus) {
+  if (! expStatuses.includes(response.status)) {
     throw new Error("Received unexpected status code " + response.status + " on " + opDesc + " operation with response body: " + JSON.stringify(jsonResponse))
   }
   return jsonResponse;
@@ -29,127 +30,32 @@ async function encryptForGithub(secret, key) {
   return output
 }
 
-async function updateGithubSecret(tokenHolder, secretName, secretVal) {
-  const encSecret = await encryptForGithub(secretVal, tokenHolder.repoKey);
-  const url = `https://api.github.com/repos/${tokenHolder.repoOwnerAndName}/actions/secrets/${secretName}`;
-  const headers = {'Accept': 'application/vnd.github+json', 'Authorization': `Bearer ${tokenHolder.repoToken}`, 'X-GitHub-Api-Version': '2022-11-28'};
-  const body = JSON.stringify({encrypted_value: encSecret, key_id: tokenHolder.repoKeyID});
-  await doFetchRaw(url, {method: 'PUT', headers, body}, 204, `Update Github secret ${secretName}`, false);
+async function updateGithubSecret(repoKeyID, repoKey, repoOwnerAndName, repoToken, secretName, secretVal) {
+  const encSecret = await encryptForGithub(secretVal, repoKey);
+  const url = `https://api.github.com/repos/${repoOwnerAndName}/actions/secrets/${secretName}`;
+  const headers = {'Accept': 'application/vnd.github+json', 'Authorization': `Bearer ${repoToken}`, 'X-GitHub-Api-Version': '2022-11-28'};
+  const body = JSON.stringify({encrypted_value: encSecret, key_id: repoKeyID});
+  await doFetchRaw(url, {method: 'PUT', headers, body}, [201, 204], `Update Github secret ${secretName}`, false);
 }
 
-async function refreshTokens(tokenHolder) {
-  const formData = {};
-  formData.client_id = tokenHolder.graphClientId;
-  formData.scope = tokenHolder.graphScope;
-  formData.refresh_token = tokenHolder.graphRefreshToken;
-  formData.grant_type = 'refresh_token';
-  formData.client_secret = tokenHolder.graphClientSecret;
-  var formBody = [];
-  for (var property in formData) {
-    var encodedKey = encodeURIComponent(property);
-    var encodedValue = encodeURIComponent(formData[property]);
-    formBody.push(encodedKey + "=" + encodedValue);
-  }
-  formBody = formBody.join("&");
-  const response = await doFetchRaw(`https://login.microsoftonline.com/${tokenHolder.graphTenant}/oauth2/v2.0/token`,
-    {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: formBody},
-    200, 'Refresh Graph tokens');
-  tokenHolder.graphAccessToken = response.access_token;
-  await updateGithubSecret(tokenHolder, tokenHolder.repoGraphAccessTokenSecret, tokenHolder.graphAccessToken);
-  tokenHolder.graphRefreshToken = response.refresh_token;
-  await updateGithubSecret(tokenHolder, tokenHolder.repoGraphRefreshTokenSecret, tokenHolder.graphRefreshToken);
+async function getSheetData(workbook, sheetName) {
+  return await workbook.worksheet(sheetName).usedRange().getRowsAsObjects();
 }
 
-async function doFetchWithRefresh(url, tokenHolder, options, expStatus, opDesc, respBody = true) {
-  if (! ('headers' in options)) {
-    options.headers = {};
-  }
-  options.headers.Authorization = `Bearer ${tokenHolder.graphAccessToken}`;
+async function filterUnprocessedIncomingRows(workbook, statusCol, maxRows) {
+  const table = workbook.table('intake_form');
+  await workbook.createSession(false);
   try {
-    return await doFetchRaw(url, options, expStatus, opDesc, respBody);
-  } catch (err) {
-    // TODO do this better!
-    if (err.message.includes('Received unexpected status code 401 on ') && err.message.includes('"InvalidAuthenticationToken"')) {
-      console.log("Detected invalid access token, trying to refresh");
-      await refreshTokens(tokenHolder);
-      options.headers.Authorization = `Bearer ${tokenHolder.graphAccessToken}`;
-      return await doFetchRaw(url, options, expStatus, opDesc, respBody);
-    } else {
-      throw err;
-    }
-  }
-}
-
-async function createSession(tokenHolder, sheetUrl, persistent) {
-  const resp = await doFetchWithRefresh(sheetUrl + '/createSession', tokenHolder,
-    {method: 'POST',
-     headers: {'Content-Type': 'application/json'},
-     body: JSON.stringify({persistChanges: persistent})},
-    201, 'Create session');
-  return resp.id;
-}
-
-async function closeSession(tokenHolder, sheetUrl, sessionId) {
-  await doFetchWithRefresh(sheetUrl + '/closeSession', tokenHolder,
-    {method: 'POST',
-     headers: {'Content-Type': 'application/json', 'workbook-session-id': sessionId}},
-    204, 'Close session', false);
-}
-
-function toObj(headers, row) {
-  const rowObj = {};
-  for (var i = 0; i < headers.length; i++) {
-      rowObj[headers[i]] = i < row.length? row[i]: '';
-  }
-  return rowObj;
-}
-
-async function getSheetData(tokenHolder, sheetUrl, sheetName) {
-  const rangeResp = await doFetchWithRefresh(sheetUrl + '/worksheets/' + sheetName + '/usedRange', tokenHolder,
-    {}, 200, 'Fetch sheet data');
-  const headers = rangeResp.values.shift();
-  const data = rangeResp.values.map(row => toObj(headers, row));
-  return [headers, data]
-}
-
-async function getUnprocessedIncomingRows(tokenHolder, sheetUrl, statusCol) {
-  const [headers, dataRows] = await getSheetData(tokenHolder, sheetUrl, 'incoming');
-  const result = [];
-  for (var i = 0; i < dataRows.length; i++) {
-    var row = dataRows[i];
-    if (row[statusCol] === '') {
-        result.push({rowIdx: i + 1, rowData: row});
-    }
-  }
-  return [headers, result];
-}
-
-async function filterUnprocessedIncomingRows(tokenHolder, sheetUrl, statusCol, maxRows) {
-  const table = 'intake_form';
-  const sessionId = await createSession(tokenHolder, sheetUrl, false);
-  try {
-    await doFetchWithRefresh(sheetUrl + '/tables/' + table + '/clearFilters', tokenHolder,
-      {method: 'POST', headers: {'Workbook-Session-Id': sessionId}}, 204, 'Clear table filters', false);
-    await doFetchWithRefresh(sheetUrl + '/tables/' + table + '/columns/' + statusCol + '/filter/apply', tokenHolder,
-      {method: 'POST', headers: {'Workbook-Session-Id': sessionId},
-       body: JSON.stringify({criteria: {filterOn: 'values', values: [''] } })}, 204, 'Apply status filter', false);
-    // maxRows + 1 for header which is always present
-    const resp = await doFetchWithRefresh(sheetUrl + '/tables/' + table + '/range/visibleView/rows'
-      + (maxRows == -1? '': '?$top=' + (maxRows + 1)), tokenHolder,
-      {method: 'GET', headers: {'Workbook-Session-Id': sessionId}}, 200, 'Get filtered rows');
-    const headers = resp.value.shift().values[0];
-    const result = [];
-    for (const row of resp.value) {
-        result.push({rowAddresses: row.cellAddresses[0], rowData: toObj(headers, row.values[0])});
-    }
-    return [headers, result];
+    await table.clearFilters();
+    await table.applyFilter(statusCol, {filterOn: 'values', values: [''] });
+    return await table.getVisibleRowsAsObjectsWithAddresses(maxRows);
   } finally {
-    await closeSession(tokenHolder, sheetUrl, sessionId);
+    await workbook.closeSession();
   }
 }
 
-async function getKV(tokenHolder, sheetUrl, sheetName, keyCol, valueCol, allowEmptyVal, base) {
-  const [headers, dataRows] = await getSheetData(tokenHolder, sheetUrl, sheetName);
+async function getKV(workbook, sheetName, keyCol, valueCol, allowEmptyVal, base) {
+  const dataRows = await getSheetData(workbook, sheetName);
   const result = JSON.parse(JSON.stringify(base));
   for (const row of dataRows) {
       const val = row[valueCol];
@@ -191,17 +97,7 @@ function toContiguousBlocks(rowUpdates) {
     return blocks;
 }
 
-async function updateTableRow(tokenHolder, sessionId, sheetUrl, table, numCols, tableRowIdx, updateIdx, updateVals) {
-    const vals = new Array(numCols).fill(null);
-    for (var i = 0; i < updateIdx.length; i++) {
-        vals[updateIdx[i]] = updateVals[i];
-    }
-    await doFetchWithRefresh(`${sheetUrl}/tables/${table}/rows/$/ItemAt(index=${tableRowIdx})`, tokenHolder,
-        {method: 'PATCH', body: JSON.stringify({values: [vals]}),
-         headers: {'Workbook-Session-Id': sessionId}}, 200, 'Update table row');
-}
-
-async function updateRowsViaBlockRange(tokenHolder, sessionId, sheetUrl, sheet, updateIdx, block) {
+async function updateRowsViaBlockRange(workbook, sheet, updateIdx, block) {
     const values = [];
     for (const [rowAddr, updateVals] of block) {
         const vals = new Array(rowAddr.length).fill(null);
@@ -214,15 +110,13 @@ async function updateRowsViaBlockRange(tokenHolder, sessionId, sheetUrl, sheet, 
     const lastRowAddr = block[block.length - 1][0];
     const bottomRight = lastRowAddr[lastRowAddr.length - 1];
     console.log(`Making batch update call for rows ${topLeft}:${bottomRight}`);
-    await doFetchWithRefresh(`${sheetUrl}/worksheets/${sheet}/range(address='${topLeft}:${bottomRight}')`, tokenHolder,
-        {method: 'PATCH', body: JSON.stringify({values}),
-         headers: {'Workbook-Session-Id': sessionId, 'Content-Type': 'application/json'}},
-        200, 'Update range');
+    const range = workbook.worksheet(sheet).range(`${topLeft}:${bottomRight}`);
+    await range.update(JSON.stringify({values}));
 }
 
 async function getSFToken(instanceUrl, clientId, clientSecret) {
   const url = `${instanceUrl}/services/oauth2/token?grant_type=client_credentials&client_id=${clientId}&client_secret=${clientSecret}`
-  const resp = await doFetchRaw(url, {method: 'POST'}, 200, "SalesForce token generation")
+  const resp = await doFetchRaw(url, {method: 'POST'}, [200], "SalesForce token generation")
   return resp.access_token;
 }
 
@@ -234,47 +128,82 @@ async function createSFRecord(token, instanceUrl, version, recordType, row, fiel
   }
   const options = {method: 'POST', body: JSON.stringify(body),
                    headers: {'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`}}
-  const resp = await doFetchRaw(url, options, 201, "SalesForce record creation");
+  const resp = await doFetchRaw(url, options, [201], "SalesForce record creation");
   return resp;
 }
 
+const payload = github.context.payload.client_payload;
+console.log('Event payload: ', JSON.stringify(payload));
+const sourceLocation = payload.sourceLocation;
+
+const repoOwnerAndName = core.getInput('repo-owner-name');
+const repoKeyID = core.getInput('repo-key-id');
+const repoKey = core.getInput('repo-key');
+const repoToken = core.getInput('repo-token');
+const repoMsalCacheDumpSecret = core.getInput('repo-msal-cache-dump-secret');
+
+const graphTenant = core.getInput('ms-graph-tenant');
+const graphRefreshToken = core.getInput('ms-graph-refresh-token');
+const graphClientId = core.getInput('ms-graph-client-id');
+const graphClientSecret = core.getInput('ms-graph-client-secret');
+const graphScopes = core.getInput('ms-graph-scope').split(' ');
+const maxRows = parseInt(core.getInput('max-rows'));
+var msalCacheDump = core.getInput('msal-cache-dump');
+
+const sfInstanceUrl = core.getInput('sf-instance-url');
+const sfClientId = core.getInput('sf-client-id');
+const sfClientSecret = core.getInput('sf-client-secret');
+
+const defaultConfig = JSON.parse(core.getInput('default-settings'));
+
+class GithubCachePlugin {
+
+    async beforeCacheAccess(cacheContext) {
+      console.log("LOAD CALLBACK");
+      if (msalCacheDump) {
+        cacheContext.tokenCache.deserialize(msalCacheDump);
+      }
+    }
+
+    async afterCacheAccess(cacheContext) {
+      console.log("SAVE CALLBACK");
+      if (cacheContext.cacheHasChanged) {
+        console.log("WRITING MODIFIED CACHE");
+        msalCacheDump = cacheContext.tokenCache.serialize();
+        await updateGithubSecret(repoKeyID, repoKey, repoOwnerAndName, repoToken, repoMsalCacheDumpSecret, msalCacheDump);
+      }
+    }
+
+    async getPluginMetadata() {
+      return {};
+    }
+}
 
 try {
-  const payload = github.context.payload.client_payload;
-  console.log('Event payload: ', JSON.stringify(payload));
-  const sourceLocation = payload.sourceLocation;
-
-  const repoOwnerAndName = core.getInput('repo-owner-name');
-  const repoKeyID = core.getInput('repo-key-id');
-  const repoKey = core.getInput('repo-key');
-  const repoToken = core.getInput('repo-token');
-  const repoGraphAccessTokenSecret = core.getInput('repo-graph-access-token-secret');
-  const repoGraphRefreshTokenSecret = core.getInput('repo-graph-refresh-token-secret');
-
-  const graphTenant = core.getInput('ms-graph-tenant');
-  const graphAccessToken = core.getInput('ms-graph-auth-token');
-  const graphRefreshToken = core.getInput('ms-graph-refresh-token');
-  const graphClientId = core.getInput('ms-graph-client-id');
-  const graphClientSecret = core.getInput('ms-graph-client-secret');
-  const graphScope = core.getInput('ms-graph-scope');
-  const maxRows = parseInt(core.getInput('max-rows'));
-
-  const sfInstanceUrl = core.getInput('sf-instance-url');
-  const sfClientId = core.getInput('sf-client-id');
-  const sfClientSecret = core.getInput('sf-client-secret');
-
-  const defaultConfig = JSON.parse(core.getInput('default-settings'));
-
   async function doWork() {
     if (! sourceLocation.startsWith('onedrive:/')) {
         throw new Error('Unsupported source location ' + sourceLocation);
     }
-    const tokenholder = {graphTenant, graphAccessToken, graphRefreshToken, graphClientId, graphClientSecret, graphScope,
-        repoOwnerAndName, repoKeyID, repoKey, repoToken, repoGraphAccessTokenSecret, repoGraphRefreshTokenSecret};
-    const workbookUrl = `https://graph.microsoft.com/v1.0/${sourceLocation.substring('onedrive:/'.length)}/workbook`
+
+    const cachePlugin = new GithubCachePlugin();
+    const auth = new OneDriveAuth({
+      clientId: graphClientId,
+      clientSecret: graphClientSecret,
+      tenant: graphTenant,
+      cachePlugin,
+      scopes: graphScopes
+    });
+    if (! msalCacheDump) {
+      await auth.app.acquireTokenByRefreshToken({refreshToken: graphRefreshToken, scopes: graphScopes, forceCache: true});
+    }
+    const client = new OneDrive({
+      auth,
+    });
+    const workbook = client.getWorkbookFromPath(sourceLocation.substring('onedrive:'.length) + '/workbook');
+
     console.log("Base config: ", JSON.stringify(defaultConfig));
-    const metadata = await getKV(tokenholder, workbookUrl, 'metadata', 'Key', 'Value', true, defaultConfig);
-    console.log("Final config: ", JSON.stringify(metadata))
+    const metadata = await getKV(workbook, 'metadata', 'Key', 'Value', true, defaultConfig);
+    console.log("Final config: ", JSON.stringify(metadata));
     const statusCol = metadata['IncomingStatusColumn'];
     const msgCol = metadata['IncomingErrorMsgColumn'];
     const sfType = metadata['SFObjectType'];
@@ -282,10 +211,11 @@ try {
     const sfMappingSheet = metadata['SFMappingSheet'];
     const formFieldNameCol = metadata['FormFieldNameColumn'];
     const sfFieldNameCol = metadata['SFFieldNameColumn'];
-    const sfMapping = await getKV(tokenholder, workbookUrl, sfMappingSheet, formFieldNameCol, sfFieldNameCol, false, {});
-    console.log("Mapping: ", JSON.stringify(sfMapping));
+    const sfMapping = await getKV(workbook, sfMappingSheet, formFieldNameCol, sfFieldNameCol, false, {});
+    console.log("SF Field Mapping: ", JSON.stringify(sfMapping));
 
-    const [headers, rows] = await filterUnprocessedIncomingRows(tokenholder, workbookUrl, statusCol, maxRows);
+    const headers = await workbook.table('intake_form').getHeaderNames();
+    const rows = await filterUnprocessedIncomingRows(workbook, statusCol, maxRows);
     const statusIdx = headers.indexOf(statusCol);
     const msgIdx = headers.indexOf(msgCol);
     const token = await getSFToken(sfInstanceUrl, sfClientId, sfClientSecret)
@@ -294,22 +224,22 @@ try {
     const updates = []
     for (const row of rows) {
         try {
-            const rowRes = await createSFRecord(token, sfInstanceUrl, sfVersion, sfType, row.rowData, sfMapping);
-            result.push({rowRange: `${row.rowAddresses[0]}:${row.rowAddresses[row.rowAddresses.length - 1]}`, status: 'SUCCESS', response: rowRes});
-            updates.push([row.rowAddresses, ['Y', 'SUCCESS']]);
+            const rowRes = await createSFRecord(token, sfInstanceUrl, sfVersion, sfType, row.data, sfMapping);
+            result.push({rowRange: `${row.cellAddresses[0]}:${row.cellAddresses[row.cellAddresses.length - 1]}`, status: 'SUCCESS', response: rowRes});
+            updates.push([row.cellAddresses, ['Y', 'SUCCESS']]);
         } catch (err) {
-            result.push({rowRange: `${row.rowAddresses[0]}:${row.rowAddresses[row.rowAddresses.length - 1]}`, status: 'FAILURE', errorMessage: err.message});
-            updates.push([row.rowAddresses, ['N', `FAILURE: ${err.message}`]]);
+            result.push({rowRange: `${row.cellAddresses[0]}:${row.cellAddresses[row.cellAddresses.length - 1]}`, status: 'FAILURE', errorMessage: err.message});
+            updates.push([row.cellAddresses, ['N', `FAILURE: ${err.message}`]]);
         }
     }
-    const sessionId = await createSession(tokenholder, workbookUrl, true);
+    await workbook.createSession(true);
     try {
         const blocks = toContiguousBlocks(updates);
         for (const block of blocks) {
-            await updateRowsViaBlockRange(tokenholder, sessionId, workbookUrl, 'incoming', [statusIdx, msgIdx], block[2]);
+            await updateRowsViaBlockRange(workbook, 'incoming', [statusIdx, msgIdx], block[2]);
         }
     } finally {
-      await closeSession(tokenholder, workbookUrl, sessionId);
+      await workbook.closeSession();
     }
     return result;
   }
