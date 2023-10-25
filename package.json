@@ -21,7 +21,7 @@
   "dependencies": {
     "@actions/core": "^1.10.0",
     "@actions/github": "^5.1.1",
-    "@adobe/helix-onedrive-support": "^10.6.4",
+    "@adobe/helix-onedrive-support": "^10.8.5",
     "googleapis": "^118.0.0",
     "install": "^0.13.0",
     "libsodium-wrappers": "^0.7.13",
