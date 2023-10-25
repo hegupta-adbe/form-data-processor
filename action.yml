@@ -13,19 +13,12 @@ inputs:
   repo-token:
     description: 'Repository bearer token'
     required: true
-  repo-graph-access-token-secret:
-    description: 'Repository secret name for MS Graph access token'
+  repo-msal-cache-dump-secret:
+    description: 'Repository secret name for MSAL token cache dump'
     required: true
-    default: 'MS_GRAPH_AUTH_TOKEN'
-  repo-graph-refresh-token-secret:
-    description: 'Repository secret name for MS Graph refresh token'
-    required: true
-    default: 'MS_GRAPH_REFRESH_TOKEN'
+    default: 'MSAL_CACHE_DUMP'
   ms-graph-tenant:
     description: 'MS Graph tenant ID'
-    required: true
-  ms-graph-auth-token:
-    description: 'MS Graph access token'
     required: true
   ms-graph-refresh-token:
     description: 'MS Graph refresh token'
@@ -44,6 +37,9 @@ inputs:
     description: 'Max rows to be processed'
     required: true
     default: '-1'
+  msal-cache-dump:
+    description: 'MSAL token cache dump'
+    required: true
   sf-instance-url:
     description: 'Salesforce Instance URL'
     required: true
